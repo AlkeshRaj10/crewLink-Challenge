@@ -9,11 +9,14 @@
     "start": "node dist/server.js",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "worker": "tsx src/workers/runOutboxWorker.ts",
     "test:db": "tsx --test src/db/schema.test.ts",
     "test:auth": "tsx --test src/auth/auth.test.ts",
     "test:seed": "tsx --test src/db/seed.test.ts",
     "test:announcements": "tsx --test src/announcements/announcements.test.ts",
-    "test:members": "tsx --test src/announcements/memberRoutes.test.ts"
+    "test:ai": "tsx --test src/announcements/aiDraft.test.ts",
+    "test:members": "tsx --test src/announcements/memberRoutes.test.ts",
+    "test:worker": "tsx --test src/workers/outboxWorker.test.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

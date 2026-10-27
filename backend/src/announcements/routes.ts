@@ -4,6 +4,11 @@ import type { Pool, PoolClient } from "pg";
 import type { AuthenticatedRequest } from "../auth/request.js";
 import { createAuthenticator } from "../middleware/authenticate.js";
 import { createRequireLocalRole } from "../middleware/requireLocalRole.js";
+import {
+  AiDraftError,
+  generateAnnouncementDraft,
+  type AiDraftGenerator,
+} from "./aiDraft.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -31,10 +36,56 @@ function sendRequestHash(announcementId: string, classificationId: string | null
     .digest("hex");
 }
 
-export function createAnnouncementRouter(database: Pool): Router {
+export function createAnnouncementRouter(
+  database: Pool,
+  generateDraft: AiDraftGenerator = generateAnnouncementDraft,
+): Router {
   const router = Router({ mergeParams: true });
   const authenticate = createAuthenticator(database);
   const requireLeader = createRequireLocalRole(database, "leader");
+
+  router.post(
+    "/ai-draft",
+    authenticate,
+    requireLeader,
+    async (request, response, next) => {
+      if (
+        !isRecord(request.body) ||
+        Object.keys(request.body).some((key) => key !== "notes") ||
+        typeof request.body.notes !== "string" ||
+        request.body.notes.trim().length === 0 ||
+        request.body.notes.trim().length > 10_000
+      ) {
+        response.status(400).json({ error: "Provide leadership notes containing 1-10000 characters" });
+        return;
+      }
+
+      const localId = request.params.localId as string;
+      const userId = (request as AuthenticatedRequest).userId!;
+      try {
+        const suggestion = await generateDraft(request.body.notes.trim());
+        const result = await database.query(
+          `INSERT INTO announcements
+             (local_id, author_user_id, title, body, push_preview, status)
+           VALUES ($1, $2, $3, $4, $5, 'draft')
+           RETURNING id, local_id, title, body, push_preview, needs_ack, status, approved_by_user_id, approved_at, created_at`,
+          [localId, userId, suggestion.title, suggestion.body, suggestion.pushPreview],
+        );
+        response.status(201).json({ announcement: result.rows[0] });
+      } catch (error) {
+        if (error instanceof AiDraftError) {
+          if (error.kind === "unavailable") {
+            response.status(503).json({ error: "AI drafting is not configured; create a draft manually" });
+            return;
+          }
+          console.error("AI announcement draft generation failed:", error.kind);
+          response.status(502).json({ error: "AI could not produce a valid draft; create a draft manually" });
+          return;
+        }
+        next(error);
+      }
+    },
+  );
 
   router.post(
     "/",
