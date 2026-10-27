@@ -41,6 +41,10 @@ npm run dev
 
 Open `http://localhost:3000` and sign in with a leadership account from `TEST ACCOUNTS`. Set `NEXT_PUBLIC_API_BASE_URL` in `frontend/.env.local` if the API is not at `http://localhost:4000`; set the matching API `CORS_ORIGIN` to the frontend origin. The dashboard loads only local roles returned by `/auth/me`; the API independently verifies local leadership authorization on every request. Leaders can create or edit drafts, generate editable AI suggestions, select an optional classification audience, explicitly send, and monitor sent/delivered/read/acknowledged totals. Counts refresh every four seconds while the workspace is open.
 
+## Member inbox and push delivery
+
+Members sign in with their member account to see approved announcements addressed to them in the inbox. Messages appear there as soon as the leader sends them; push delivery is a separate asynchronous step. Keep `npm run worker` running in the backend directory to process the outbox. The included provider simulates push delivery for development and does not send actual device notifications, email, or SMS.
+
 ## TEST ACCOUNTS
 
 These credentials are for local assessment only. The seed contains synthetic accounts; never reuse these passwords or seed credentials in production.

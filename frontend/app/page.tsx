@@ -11,6 +11,17 @@ interface LocalAccess {
   role: "leader" | "member";
 }
 
+interface MemberAnnouncement {
+  id: string;
+  title: string;
+  body: string;
+  push_preview: string | null;
+  needs_ack: boolean;
+  sent_at: string | null;
+  read_at: string | null;
+  acknowledged_at: string | null;
+}
+
 interface Classification {
   id: string;
   name: string;
@@ -97,6 +108,7 @@ function formatStatus(status: Announcement["status"]): string {
 export default function LeadershipPage() {
   const [token, setToken] = useState<string | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
+  const [portalMode, setPortalMode] = useState<"leader" | "member">("leader");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [localAccess, setLocalAccess] = useState<LocalAccess[]>([]);
@@ -118,6 +130,10 @@ export default function LeadershipPage() {
     () => localAccess.filter((access) => access.role === "leader"),
     [localAccess],
   );
+  const memberLocals = useMemo(
+    () => localAccess.filter((access) => access.role === "member"),
+    [localAccess],
+  );
   const selectedAnnouncement = announcements.find((announcement) => announcement.id === selectedAnnouncementId);
   const canEditSelected = !selectedAnnouncementId || selectedAnnouncement?.status === "draft";
   const dirty = savedDraft !== null && !sameDraft(draft, savedDraft);
@@ -132,6 +148,19 @@ export default function LeadershipPage() {
           : draft.pushPreview.length > 120
             ? "The push preview must be 120 characters or fewer."
             : "";
+  const sendDisabledReason = busy
+    ? "Wait for the current request to finish."
+    : !selectedAnnouncementId
+      ? "Save this announcement as a draft before sending."
+      : !savedDraft
+        ? "The selected draft is still loading."
+        : dirty
+          ? "Save your edits before sending."
+          : formError
+            ? formError
+            : !["draft", "approved"].includes(selectedAnnouncement?.status ?? "")
+              ? `This announcement is ${formatStatus(selectedAnnouncement?.status ?? "draft").toLowerCase()} and cannot be sent again.`
+              : "";
 
   const clearSession = useCallback((message = "") => {
     localStorage.removeItem(tokenStorageKey);
@@ -165,10 +194,13 @@ export default function LeadershipPage() {
         if (!active) return;
         const leaders = access.filter((item) => item.role === "leader");
         setLocalAccess(access);
+        setPortalMode(leaders.length === 0 && access.some((item) => item.role === "member") ? "member" : "leader");
         setSelectedLocalId((current) =>
           leaders.some((leader) => leader.local_id === current) ? current : leaders[0]?.local_id ?? "",
         );
-        setError(leaders.length === 0 ? "This account does not have leadership access to a local." : "");
+        setError(leaders.length === 0 && !access.some((item) => item.role === "member")
+          ? "This account does not have access to a local."
+          : "");
       })
       .catch((requestError: ApiError) => {
         if (!active) return;
@@ -408,11 +440,28 @@ export default function LeadershipPage() {
     );
   }
 
+  if (portalMode === "member") {
+    return (
+      <MemberPortal
+        token={token}
+        memberLocals={memberLocals}
+        canSwitchToLeadership={leaderLocals.length > 0}
+        onSwitchToLeadership={() => setPortalMode("leader")}
+        onSignOut={() => clearSession()}
+      />
+    );
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand"><span className="brand-mark">C</span><span>CrewLink</span><span className="brand-divider" />Leadership</div>
         <div className="topbar-right">
+          {memberLocals.length > 0 && (
+            <button className="button button-quiet" onClick={() => setPortalMode("member")} type="button">
+              Member inbox
+            </button>
+          )}
           <div className="local-picker">
             <span className="local-picker-label">WORKING LOCAL</span>
             <select
@@ -522,12 +571,22 @@ export default function LeadershipPage() {
                   <button className="button button-secondary" type="submit" disabled={busy || Boolean(formError) || !canEditSelected}>
                     {busy ? "Saving…" : !canEditSelected ? "Read-only" : savedDraft && selectedAnnouncementId ? "Save changes" : "Save as draft"}
                   </button>
-                  <button className="button button-primary" type="button" onClick={() => void sendAnnouncement()} disabled={busy || !selectedAnnouncementId || !savedDraft || dirty || Boolean(formError) || !["draft", "approved"].includes(selectedAnnouncement?.status ?? "")}>
+                  <button
+                    className="button button-primary"
+                    type="button"
+                    onClick={() => void sendAnnouncement()}
+                    disabled={Boolean(sendDisabledReason)}
+                    aria-describedby={sendDisabledReason ? "send-disabled-reason" : undefined}
+                  >
                     Send announcement <span aria-hidden="true">→</span>
                   </button>
                 </div>
-                {dirty && <p className="form-hint">Save your changes before sending. Sending explicitly approves this draft.</p>}
-                {!selectedAnnouncementId && <p className="form-hint">Saving does not send. You can review or edit the draft before sending.</p>}
+                {sendDisabledReason
+                  ? <p className="form-hint" id="send-disabled-reason">{sendDisabledReason}</p>
+                  : <p className="form-hint">Sending approves this draft and adds its recipients to their member inboxes.</p>}
+                {selectedAnnouncement?.status === "sending" && (
+                  <p className="form-hint">The announcement is queued. Run the backend worker (`npm run worker`) for mock push delivery.</p>
+                )}
               </form>
             </section>
 
@@ -569,6 +628,179 @@ export default function LeadershipPage() {
           </div>
         )}
         <footer className="page-footer">CrewLink Leadership <span>•</span> Secure local communications</footer>
+      </div>
+    </main>
+  );
+}
+
+function MemberPortal({
+  token,
+  memberLocals,
+  canSwitchToLeadership,
+  onSwitchToLeadership,
+  onSignOut,
+}: {
+  token: string;
+  memberLocals: LocalAccess[];
+  canSwitchToLeadership: boolean;
+  onSwitchToLeadership: () => void;
+  onSignOut: () => void;
+}) {
+  const [selectedLocalId, setSelectedLocalId] = useState(memberLocals[0]?.local_id ?? "");
+  const [announcements, setAnnouncements] = useState<MemberAnnouncement[]>([]);
+  const [selectedAnnouncementId, setSelectedAnnouncementId] = useState("");
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<MemberAnnouncement | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const refreshInbox = useCallback(async () => {
+    if (!selectedLocalId) return;
+    try {
+      const result = await apiRequest<{ announcements: MemberAnnouncement[] }>(
+        `/locals/${encodeURIComponent(selectedLocalId)}/member/announcements`,
+        token,
+      );
+      setAnnouncements(result.announcements);
+      setSelectedAnnouncementId((current) =>
+        result.announcements.some((announcement) => announcement.id === current)
+          ? current
+          : result.announcements[0]?.id ?? "",
+      );
+      setError("");
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    }
+  }, [selectedLocalId, token]);
+
+  useEffect(() => {
+    setSelectedAnnouncementId("");
+    setSelectedAnnouncement(null);
+    void refreshInbox();
+    const intervalId = window.setInterval(() => void refreshInbox(), 15_000);
+    return () => window.clearInterval(intervalId);
+  }, [refreshInbox]);
+
+  useEffect(() => {
+    if (!selectedLocalId || !selectedAnnouncementId) {
+      setSelectedAnnouncement(null);
+      return;
+    }
+    let active = true;
+    apiRequest<{ announcement: MemberAnnouncement }>(
+      `/locals/${encodeURIComponent(selectedLocalId)}/member/announcements/${selectedAnnouncementId}`,
+      token,
+    )
+      .then(({ announcement }) => {
+        if (active) {
+          setSelectedAnnouncement(announcement);
+          setAnnouncements((current) => current.map((item) =>
+            item.id === announcement.id ? announcement : item,
+          ));
+        }
+      })
+      .catch((requestError: Error) => {
+        if (active) setError(requestError.message);
+      });
+    return () => { active = false; };
+  }, [selectedAnnouncementId, selectedLocalId, token]);
+
+  async function acknowledgeAnnouncement() {
+    if (!selectedAnnouncementId || !selectedLocalId) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(
+        `/locals/${encodeURIComponent(selectedLocalId)}/member/announcements/${selectedAnnouncementId}/acknowledge`,
+        token,
+        { method: "POST" },
+      );
+      const result = await apiRequest<{ announcement: MemberAnnouncement }>(
+        `/locals/${encodeURIComponent(selectedLocalId)}/member/announcements/${selectedAnnouncementId}`,
+        token,
+      );
+      setSelectedAnnouncement(result.announcement);
+      setAnnouncements((current) => current.map((announcement) =>
+        announcement.id === result.announcement.id ? result.announcement : announcement,
+      ));
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="brand"><span className="brand-mark">C</span><span>CrewLink</span><span className="brand-divider" />Member inbox</div>
+        <div className="topbar-right">
+          {memberLocals.length > 1 && (
+            <div className="local-picker">
+              <span className="local-picker-label">YOUR LOCAL</span>
+              <select aria-label="Select your local" value={selectedLocalId} onChange={(event) => setSelectedLocalId(event.target.value)}>
+                {memberLocals.map((local) => <option value={local.local_id} key={local.local_id}>{local.local_name}</option>)}
+              </select>
+            </div>
+          )}
+          {canSwitchToLeadership && (
+            <button className="button button-quiet" onClick={onSwitchToLeadership} type="button">Leadership</button>
+          )}
+          <button className="button button-quiet" onClick={onSignOut} type="button">Sign out</button>
+        </div>
+      </header>
+      <div className="page-wrap">
+        <div className="page-heading">
+          <div><div className="eyebrow">LOCAL UPDATES</div><h1>Announcements</h1><p className="muted">Callouts sent to you by your local leadership.</p></div>
+          <button className="button button-quiet" onClick={() => void refreshInbox()} type="button">Refresh</button>
+        </div>
+        {error && <div className="alert alert-error" role="alert">{error}</div>}
+        <div className="member-inbox">
+          <section className="recent-card">
+            <div className="recent-heading"><h3>Your announcements</h3><span>{announcements.length}</span></div>
+            {announcements.length === 0
+              ? <p className="recent-empty">No announcements have been sent to you yet.</p>
+              : announcements.map((announcement) => (
+                <button
+                  className={`recent-item ${selectedAnnouncementId === announcement.id ? "recent-item-active" : ""}`}
+                  key={announcement.id}
+                  onClick={() => setSelectedAnnouncementId(announcement.id)}
+                  type="button"
+                >
+                  <span className={`recent-status ${announcement.read_at ? "status-dot-sent" : "status-dot-draft"}`} />
+                  <span className="recent-copy">
+                    <strong>{announcement.title}</strong>
+                    <small>{announcement.sent_at ? new Date(announcement.sent_at).toLocaleString() : "Recently sent"} · {announcement.read_at ? "Read" : "Unread"}</small>
+                  </span>
+                  <span className="recent-arrow">›</span>
+                </button>
+              ))}
+          </section>
+          <section className="editor-card member-message">
+            {selectedAnnouncement ? (
+              <>
+                <div className="eyebrow">ANNOUNCEMENT</div>
+                <h2>{selectedAnnouncement.title}</h2>
+                <p className="member-message-date">
+                  {selectedAnnouncement.sent_at ? new Date(selectedAnnouncement.sent_at).toLocaleString() : "Recently sent"}
+                </p>
+                {selectedAnnouncement.push_preview && <p className="member-push-preview">{selectedAnnouncement.push_preview}</p>}
+                <div className="member-message-body">{selectedAnnouncement.body}</div>
+                {selectedAnnouncement.needs_ack && (
+                  <button
+                    className="button button-primary"
+                    type="button"
+                    onClick={() => void acknowledgeAnnouncement()}
+                    disabled={busy || Boolean(selectedAnnouncement.acknowledged_at)}
+                  >
+                    {selectedAnnouncement.acknowledged_at ? "Acknowledged" : busy ? "Saving…" : "Acknowledge"}
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="counts-empty"><div className="counts-empty-icon">↗</div><strong>Select an announcement</strong><p>Choose a message to read it.</p></div>
+            )}
+          </section>
+        </div>
       </div>
     </main>
   );

@@ -102,11 +102,18 @@ test("members can only list, read, and idempotently acknowledge their own local 
        VALUES ($1, $2, 'Optional Response', 'No ack required', false, 'sent', $2, now(), now()) RETURNING id`,
       [localA, leaderA],
     )).rows[0].id as string;
+    const queuedAnnouncement = (await testPool.query(
+      `INSERT INTO announcements
+         (local_id, author_user_id, title, body, needs_ack, status, approved_by_user_id, approved_at)
+       VALUES ($1, $2, 'Queued Update', 'Available while push delivery is pending', false, 'sending', $2, now())
+       RETURNING id`,
+      [localA, leaderA],
+    )).rows[0].id as string;
 
     await testPool.query(
       `INSERT INTO announcement_recipients (local_id, announcement_id, member_id) VALUES
-        ($1, $2, $3), ($4, $5, $6), ($1, $7, $3)`,
-      [localA, announcementA, memberOneId, localB, announcementB, memberOtherId, noAcknowledgementAnnouncement],
+        ($1, $2, $3), ($4, $5, $6), ($1, $7, $3), ($1, $8, $3)`,
+      [localA, announcementA, memberOneId, localB, announcementB, memberOtherId, noAcknowledgementAnnouncement, queuedAnnouncement],
     );
 
     const memberOneToken = createAccessToken(memberOne);
@@ -121,7 +128,11 @@ test("members can only list, read, and idempotently acknowledge their own local 
     assert.deepEqual(listData.announcements.map((announcement) => announcement.id).sort(), [
       announcementA,
       noAcknowledgementAnnouncement,
+      queuedAnnouncement,
     ].sort());
+
+    const queuedReadResponse = await fetch(`${memberAPath}/${queuedAnnouncement}`, { headers: auth(memberOneToken) });
+    assert.equal(queuedReadResponse.status, 200);
 
     const readResponse = await fetch(`${memberAPath}/${announcementA}`, { headers: auth(memberOneToken) });
     assert.equal(readResponse.status, 200);

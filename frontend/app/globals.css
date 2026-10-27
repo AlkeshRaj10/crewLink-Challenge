@@ -169,6 +169,13 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .empty-panel { display: flex; min-height: 250px; flex-direction: column; align-items: center; justify-content: center; color: #718077; text-align: center; }
 .empty-panel h2 { margin: 10px 0 5px; color: var(--ink); font-family: Manrope, sans-serif; font-size: 19px; }
 .empty-panel p { margin: 4px 0; }
+.member-inbox { display: grid; grid-template-columns: minmax(260px, .75fr) minmax(0, 1.5fr); align-items: start; gap: 20px; }
+.member-inbox .recent-card { padding: 18px; }
+.member-message { min-height: 280px; }
+.member-message h2 { margin: 8px 0; font-family: Manrope, sans-serif; font-size: 23px; letter-spacing: -.5px; }
+.member-message-date { margin: 0 0 18px; color: var(--muted); font-size: 12px; }
+.member-push-preview { margin: 0 0 18px; padding: 11px 13px; border-left: 3px solid var(--green); background: #f4f8f5; color: var(--ink-soft); }
+.member-message-body { margin-bottom: 22px; color: var(--ink-soft); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty-icon { display: flex; width: 42px; height: 42px; align-items: center; justify-content: center; border-radius: 50%; background: var(--amber-pale); color: var(--amber); font-weight: 800; }
 .page-footer { padding: 22px 0 3px; color: #99a49d; font-size: 10px; text-align: center; }
 .page-footer span { margin: 0 6px; }
@@ -209,6 +216,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .refresh-indicator { font-size: 10px; }
   .editor-card { padding: 20px 16px; }
   .saved-draft-row { grid-template-columns: 1fr; gap: 7px; }
+  .member-inbox { grid-template-columns: 1fr; }
   .side-column { display: flex; }
   .form-actions { flex-direction: column-reverse; }
   .form-actions .button { width: 100%; }

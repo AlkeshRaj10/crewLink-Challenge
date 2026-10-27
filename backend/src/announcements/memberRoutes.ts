@@ -23,8 +23,8 @@ export function createMemberAnnouncementRouter(database: Pool): Router {
            ON a.local_id = ar.local_id AND a.id = ar.announcement_id
          JOIN local_members lm
            ON lm.local_id = ar.local_id AND lm.id = ar.member_id
-         WHERE ar.local_id = $1 AND lm.user_id = $2 AND a.status = 'sent'
-         ORDER BY a.sent_at DESC, a.id`,
+         WHERE ar.local_id = $1 AND lm.user_id = $2 AND a.approved_at IS NOT NULL
+         ORDER BY COALESCE(a.sent_at, a.approved_at) DESC, a.id`,
         [localId, userId],
       );
       response.status(200).json({ announcements: result.rows });
@@ -49,7 +49,7 @@ export function createMemberAnnouncementRouter(database: Pool): Router {
          FROM announcements a, local_members lm
          WHERE ar.local_id = $1 AND ar.announcement_id = $2
            AND a.local_id = ar.local_id AND a.id = ar.announcement_id
-           AND a.status = 'sent'
+           AND a.approved_at IS NOT NULL
            AND lm.local_id = ar.local_id AND lm.id = ar.member_id AND lm.user_id = $3
          RETURNING a.id, a.local_id, a.title, a.body, a.push_preview, a.needs_ack,
            a.sent_at, ar.read_at, ar.acknowledged_at, ar.rsvp`,
@@ -87,7 +87,7 @@ export function createMemberAnnouncementRouter(database: Pool): Router {
          JOIN local_members lm
            ON lm.local_id = ar.local_id AND lm.id = ar.member_id
          WHERE ar.local_id = $1 AND ar.announcement_id = $2
-           AND lm.user_id = $3 AND a.status = 'sent'
+           AND lm.user_id = $3 AND a.approved_at IS NOT NULL
          FOR UPDATE OF ar`,
         [localId, announcementId, userId],
       );
