@@ -241,6 +241,14 @@ export async function seedDatabase(database: Pool): Promise<SeedSummary> {
         local_id = EXCLUDED.local_id, id = EXCLUDED.id,
         read_at = EXCLUDED.read_at, acknowledged_at = EXCLUDED.acknowledged_at`,
     );
+    await client.query(
+      `INSERT INTO outbox_jobs (local_id, recipient_id)
+       SELECT local_id, id
+       FROM announcement_recipients
+       WHERE local_id = $1 AND announcement_id = $2
+       ON CONFLICT (local_id, recipient_id) DO NOTHING`,
+      [largeLocalId, announcementId],
+    );
 
     await client.query("COMMIT");
     return {

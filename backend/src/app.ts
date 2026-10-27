@@ -6,6 +6,32 @@ import { pool } from "./db/pool.js";
 
 export const app = express();
 
+const allowedOrigins = new Set(
+  (process.env.CORS_ORIGIN ?? "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+
+app.use((request, response, next) => {
+  const origin = request.header("origin");
+  if (origin && allowedOrigins.has(origin)) {
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+    response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
+    response.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,Idempotency-Key");
+  }
+  if (request.method === "OPTIONS") {
+    if (origin && !allowedOrigins.has(origin)) {
+      response.status(403).end();
+      return;
+    }
+    response.status(204).end();
+    return;
+  }
+  next();
+});
+
 app.use(express.json({ limit: "32kb" }));
 
 app.use("/auth", authRouter);
