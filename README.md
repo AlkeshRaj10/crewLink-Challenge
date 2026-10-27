@@ -6,6 +6,7 @@ The backend uses Express, TypeScript, and PostgreSQL. PostgreSQL 13 or later is 
 
 1. Create a PostgreSQL database and user (or use an existing local development database).
 2. From the `backend` directory, copy `.env.example` to `.env` and set `DATABASE_URL` to the connection string for that database. `PORT` defaults to `4000`.
+   Set `CORS_ORIGIN` to the frontend origin (default `http://localhost:3000`; comma-separated origins are supported).
    Set `JWT_SECRET` to a unique cryptographically random secret of at least 32 bytes; the API will not start without it. To enable AI draft suggestions, set `AI_API_KEY` for an OpenAI-compatible chat-completions API; `AI_API_URL` and `AI_MODEL` default to the values in `.env.example`. Never commit API credentials. With no AI key configured, the AI drafting endpoint returns `503` while manual draft creation remains available.
 3. Install dependencies with `npm install`.
 4. Apply the schema with `npm run db:migrate`.
@@ -25,7 +26,20 @@ Run the mock push outbox worker in a separate terminal with `npm run worker` aft
 
 Local leaders can request a suggested callout draft with `POST /locals/:localId/announcements/ai-draft` and a JSON body such as `{ "notes": "messy meeting notes..." }`. It returns a saved `draft` announcement with a suggested title, body, and push preview (at most 120 characters). The AI only drafts text: it does not select recipients, approve, or send. Review and edit the stored draft, then use the existing send endpoint to explicitly approve and start delivery. Missing AI credentials return `503`; provider failures or invalid model output return `502` without creating an announcement.
 
-Run `npm run test:seed` against a disposable PostgreSQL database to verify repeated seeding does not duplicate data. Run `npm run test:announcements`, `npm run test:ai`, `npm run test:members`, and `npm run test:worker` with `TEST_DATABASE_URL` set to a disposable PostgreSQL database to test the APIs and worker behavior. The frontend is not yet implemented.
+Run `npm run test:seed` against a disposable PostgreSQL database to verify repeated seeding does not duplicate data. Run `npm run test:announcements`, `npm run test:ai`, `npm run test:members`, and `npm run test:worker` with `TEST_DATABASE_URL` set to a disposable PostgreSQL database to test the APIs and worker behavior.
+
+## Leadership frontend
+
+The Next.js + TypeScript leadership dashboard uses the existing Express API. First start PostgreSQL and the backend using the setup above. Then, in a second terminal:
+
+```powershell
+cd frontend
+Copy-Item .env.example .env.local
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` and sign in with a leadership account from `TEST ACCOUNTS`. Set `NEXT_PUBLIC_API_BASE_URL` in `frontend/.env.local` if the API is not at `http://localhost:4000`; set the matching API `CORS_ORIGIN` to the frontend origin. The dashboard loads only local roles returned by `/auth/me`; the API independently verifies local leadership authorization on every request. Leaders can create or edit drafts, generate editable AI suggestions, select an optional classification audience, explicitly send, and monitor sent/delivered/read/acknowledged totals. Counts refresh every four seconds while the workspace is open.
 
 ## TEST ACCOUNTS
 
@@ -77,6 +91,26 @@ These credentials are for local assessment only. The seed contains synthetic acc
       "method": "POST",
       "path": "/locals/:localId/announcements",
       "auth": "Authorization: Bearer <leader token>; JSON title/body"
+    },
+    {
+      "method": "POST",
+      "path": "/locals/:localId/announcements/classifications",
+      "auth": "Bearer token; user must be a leader in localId"
+    },
+    {
+      "method": "GET",
+      "path": "/locals/:localId/announcements",
+      "auth": "Bearer token; user must be a leader in localId; returns announcement recipient, delivered, read, and acknowledged counts"
+    },
+    {
+      "method": "GET",
+      "path": "/locals/:localId/announcements/:announcementId",
+      "auth": "Bearer token; user must be a leader in localId"
+    },
+    {
+      "method": "PUT",
+      "path": "/locals/:localId/announcements/:announcementId",
+      "auth": "Bearer token; local leader can edit only their own unsent draft"
     },
     {
       "method": "POST",
