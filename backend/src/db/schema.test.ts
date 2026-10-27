@@ -4,6 +4,9 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { test } from "node:test";
+import { authenticateCredentials, isActiveUser } from "../auth/accounts.js";
+import { userHasLocalRole } from "../auth/localAccess.js";
+import { hashPassword } from "../auth/password.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -26,10 +29,10 @@ test("schema enforces tenant, deduplication, and retry-key constraints", {
   });
 
   try {
-    const migrationPath = fileURLToPath(
-      new URL("./migrations/001_initial_schema.sql", import.meta.url),
-    );
-    await testPool.query(await readFile(migrationPath, "utf8"));
+    for (const migrationName of ["001_initial_schema.sql", "002_user_account_status.sql"]) {
+      const migrationPath = fileURLToPath(new URL(`./migrations/${migrationName}`, import.meta.url));
+      await testPool.query(await readFile(migrationPath, "utf8"));
+    }
 
     const localA = (await testPool.query("INSERT INTO locals (name) VALUES ('Test Local A') RETURNING id")).rows[0].id as string;
     const localB = (await testPool.query("INSERT INTO locals (name) VALUES ('Test Local B') RETURNING id")).rows[0].id as string;
@@ -60,6 +63,23 @@ test("schema enforces tenant, deduplication, and retry-key constraints", {
        VALUES ($1, $2, 'Member B', 'member-b@example.test', $3) RETURNING id`,
       [localB, memberB, classificationB],
     )).rows[0].id as string;
+    assert.equal(await userHasLocalRole(testPool, leaderA, localA, "leader"), true);
+    assert.equal(await userHasLocalRole(testPool, leaderA, localB, "leader"), false);
+    assert.equal(await userHasLocalRole(testPool, leaderA, localA, "member"), false);
+    assert.equal(await userHasLocalRole(testPool, memberA, localA, "member"), true);
+    assert.equal(await userHasLocalRole(testPool, memberA, localB, "member"), false);
+    await testPool.query("UPDATE users SET password_hash = $1 WHERE id IN ($2, $3)", [
+      hashPassword("test-password"),
+      leaderA,
+      memberA,
+    ]);
+    assert.equal(await authenticateCredentials(testPool, "LEADER-A@example.test", "wrong-password"), null);
+    assert.equal(await authenticateCredentials(testPool, "MEMBER-A@example.test", "test-password"), memberA);
+    assert.equal(await isActiveUser(testPool, leaderA), true);
+    await testPool.query("UPDATE users SET is_active = false WHERE id = $1", [leaderA]);
+    assert.equal(await isActiveUser(testPool, leaderA), false);
+    assert.equal(await authenticateCredentials(testPool, "leader-a@example.test", "test-password"), null);
+    await testPool.query("UPDATE users SET is_active = true WHERE id = $1", [leaderA]);
 
     const announcementA = (await testPool.query(
       `INSERT INTO announcements (local_id, author_user_id, title, body, status, approved_by_user_id, approved_at)

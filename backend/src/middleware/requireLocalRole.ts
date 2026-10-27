@@ -1,10 +1,10 @@
 import type { NextFunction, Response } from "express";
+import type { Pool } from "pg";
 import { pool } from "../db/pool.js";
+import { userHasLocalRole, type LocalRole } from "../auth/localAccess.js";
 import type { AuthenticatedRequest } from "../auth/request.js";
 
-export type LocalRole = "leader" | "member";
-
-export function requireLocalRole(role: LocalRole) {
+export function createRequireLocalRole(database: Pick<Pool, "query">, role: LocalRole) {
   return async (
     request: AuthenticatedRequest,
     response: Response,
@@ -25,13 +25,7 @@ export function requireLocalRole(role: LocalRole) {
     }
 
     try {
-      const membershipTable = role === "leader" ? "local_leaders" : "local_members";
-      const result = await pool.query(
-        `SELECT 1 FROM ${membershipTable} WHERE local_id = $1 AND user_id = $2`,
-        [localId, request.userId],
-      );
-
-      if (result.rowCount !== 1) {
+      if (!await userHasLocalRole(database, request.userId, localId, role)) {
         response.status(403).json({ error: "Not authorized for this local" });
         return;
       }
@@ -41,4 +35,8 @@ export function requireLocalRole(role: LocalRole) {
       next(error);
     }
   };
+}
+
+export function requireLocalRole(role: LocalRole) {
+  return createRequireLocalRole(pool, role);
 }

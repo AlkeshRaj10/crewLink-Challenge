@@ -1,11 +1,10 @@
 import { Router } from "express";
-import { hashPassword, verifyPassword } from "./password.js";
+import { authenticateCredentials } from "./accounts.js";
 import { createAccessToken, accessTokenTtlSeconds } from "./token.js";
 import { pool } from "../db/pool.js";
 import { authenticate } from "../middleware/authenticate.js";
 import type { AuthenticatedRequest } from "./request.js";
 
-const dummyPasswordHash = hashPassword("nonexistent-account-password");
 const router = Router();
 
 router.post("/login", async (request, response, next) => {
@@ -21,22 +20,13 @@ router.post("/login", async (request, response, next) => {
   }
 
   try {
-    const normalizedEmail = email.trim().toLowerCase();
-    const result = await pool.query(
-      "SELECT id, password_hash FROM users WHERE lower(email) = $1",
-      [normalizedEmail],
-    );
-    const user = result.rows[0] as { id: string; password_hash: string } | undefined;
-    const matches = user
-      ? verifyPassword(password, user.password_hash)
-      : verifyPassword(password, dummyPasswordHash);
-
-    if (!user || !matches) {
+    const userId = await authenticateCredentials(pool, email, password);
+    if (!userId) {
       response.status(401).json({ error: "Invalid email or password" });
       return;
     }
 
-    const accessToken = createAccessToken(user.id);
+    const accessToken = createAccessToken(userId);
     response.status(200).json({ accessToken, tokenType: "Bearer", expiresIn: accessTokenTtlSeconds });
   } catch (error) {
     next(error);
