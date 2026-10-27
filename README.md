@@ -19,6 +19,8 @@ To run focused PostgreSQL constraint tests, set `TEST_DATABASE_URL` to a disposa
 
 The authentication endpoints are `POST /auth/login` with `{ "email": "...", "password": "..." }` (returns a one-hour bearer token) and `GET /auth/me` with `Authorization: Bearer <token>` (returns the authenticated user's local roles). Local leaders can create drafts with `POST /locals/:localId/announcements` and send with `POST /locals/:localId/announcements/:announcementId/send`, using `Authorization: Bearer <token>`. Send requests require an `Idempotency-Key` header and accept an optional `{ "classificationId": "<uuid>" }` body. The leader's explicit Send action approves the draft. A successful send returns `202 Accepted`; recipient snapshots and outbox jobs are committed before that response, while provider delivery is not implemented yet.
 
+Members can list their sent callouts with `GET /locals/:localId/member/announcements`, read a recipient callout with `GET /locals/:localId/member/announcements/:announcementId`, and acknowledge an acknowledgement-required callout with `POST /locals/:localId/member/announcements/:announcementId/acknowledge`. All require `Authorization: Bearer <token>`; list/read/acknowledgement queries additionally require a recipient row linked to that member's local membership. Reading and acknowledging save their first timestamps; repeated reads and acknowledgements preserve those timestamps.
+
 ## TEST ACCOUNTS
 
 These credentials are for local assessment only. The seed contains synthetic accounts; never reuse these passwords or seed credentials in production.
@@ -74,6 +76,21 @@ These credentials are for local assessment only. The seed contains synthetic acc
       "method": "POST",
       "path": "/locals/:localId/announcements/:announcementId/send",
       "auth": "Authorization: Bearer <leader token>; Idempotency-Key header; optional JSON classificationId"
+    },
+    {
+      "method": "GET",
+      "path": "/locals/:localId/member/announcements",
+      "auth": "Authorization: Bearer <member token>"
+    },
+    {
+      "method": "GET",
+      "path": "/locals/:localId/member/announcements/:announcementId",
+      "auth": "Authorization: Bearer <member token>; must be an announcement recipient"
+    },
+    {
+      "method": "POST",
+      "path": "/locals/:localId/member/announcements/:announcementId/acknowledge",
+      "auth": "Authorization: Bearer <member token>; must be recipient and acknowledgement must be required"
     }
   ]
 }
@@ -81,4 +98,4 @@ These credentials are for local assessment only. The seed contains synthetic acc
 
 The seed creates 2,000 active members in Local 27 and 200 in Local 99, each spread across four classifications, with one leadership login and one member login per local. The seeded sent announcement has one recipient row per Local 27 member; push status remains queued because the push worker is not implemented.
 
-Run `npm run test:seed` against a disposable PostgreSQL database to verify repeated seeding does not duplicate data. Run `npm run test:announcements` with `TEST_DATABASE_URL` and `DATABASE_URL` set to a disposable PostgreSQL database to test local-scoped draft and send behavior, recipient snapshots, idempotency, and concurrent sends. Delivery workers, push-provider integration, AI, and the frontend are not yet implemented.
+Run `npm run test:seed` against a disposable PostgreSQL database to verify repeated seeding does not duplicate data. Run `npm run test:announcements` and `npm run test:members` with `TEST_DATABASE_URL` set to a disposable PostgreSQL database to test leader send and member recipient-scoped API behavior. Delivery workers, push-provider integration, AI, and the frontend are not yet implemented.

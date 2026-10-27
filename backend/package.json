@@ -12,7 +12,8 @@
     "test:db": "tsx --test src/db/schema.test.ts",
     "test:auth": "tsx --test src/auth/auth.test.ts",
     "test:seed": "tsx --test src/db/seed.test.ts",
-    "test:announcements": "tsx --test src/announcements/announcements.test.ts"
+    "test:announcements": "tsx --test src/announcements/announcements.test.ts",
+    "test:members": "tsx --test src/announcements/memberRoutes.test.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
