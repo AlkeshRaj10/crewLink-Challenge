@@ -34,7 +34,8 @@ test("seed can be rerun without duplicating local data", {
         (SELECT count(*)::int FROM local_leaders) AS leaders,
         (SELECT count(*)::int FROM local_members) AS members,
         (SELECT count(*)::int FROM announcements WHERE status = 'sent') AS sent_announcements,
-        (SELECT count(*)::int FROM announcement_recipients) AS recipients
+        (SELECT count(*)::int FROM announcement_recipients) AS recipients,
+        (SELECT count(*)::int FROM outbox_jobs) AS outbox_jobs
     `);
     const afterFirstSeed = firstCounts.rows[0];
 
@@ -46,7 +47,8 @@ test("seed can be rerun without duplicating local data", {
         (SELECT count(*)::int FROM local_leaders) AS leaders,
         (SELECT count(*)::int FROM local_members) AS members,
         (SELECT count(*)::int FROM announcements WHERE status = 'sent') AS sent_announcements,
-        (SELECT count(*)::int FROM announcement_recipients) AS recipients
+        (SELECT count(*)::int FROM announcement_recipients) AS recipients,
+        (SELECT count(*)::int FROM outbox_jobs) AS outbox_jobs
     `);
     const afterSecondSeed = secondCounts.rows[0];
 
@@ -59,6 +61,7 @@ test("seed can be rerun without duplicating local data", {
       members: 2_200,
       sent_announcements: 1,
       recipients: 2_000,
+      outbox_jobs: 2_000,
     });
 
     const perLocalCounts = await testPool.query(`

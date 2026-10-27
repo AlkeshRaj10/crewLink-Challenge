@@ -44,6 +44,139 @@ export function createAnnouncementRouter(
   const authenticate = createAuthenticator(database);
   const requireLeader = createRequireLocalRole(database, "leader");
 
+  router.get("/classifications", authenticate, requireLeader, async (request, response, next) => {
+    try {
+      const result = await database.query(
+        `SELECT id, name
+         FROM classifications
+         WHERE local_id = $1
+         ORDER BY name`,
+        [request.params.localId],
+      );
+      response.status(200).json({ classifications: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/", authenticate, requireLeader, async (request, response, next) => {
+    try {
+      const result = await database.query(
+        `SELECT announcement.id, announcement.local_id, announcement.title, announcement.body,
+                announcement.push_preview, announcement.needs_ack, announcement.status,
+                announcement.approved_at, announcement.sent_at, announcement.created_at,
+                (SELECT count(*)::int
+                 FROM announcement_recipients recipient
+                 WHERE recipient.local_id = announcement.local_id
+                   AND recipient.announcement_id = announcement.id) AS recipient_count,
+                (SELECT count(*)::int
+                 FROM announcement_recipients recipient
+                 WHERE recipient.local_id = announcement.local_id
+                   AND recipient.announcement_id = announcement.id
+                   AND recipient.push_status = 'delivered') AS sent_count,
+                (SELECT count(*)::int
+                 FROM announcement_recipients recipient
+                 WHERE recipient.local_id = announcement.local_id
+                   AND recipient.announcement_id = announcement.id
+                   AND recipient.read_at IS NOT NULL) AS read_count,
+                (SELECT count(*)::int
+                 FROM announcement_recipients recipient
+                 WHERE recipient.local_id = announcement.local_id
+                   AND recipient.announcement_id = announcement.id
+                   AND recipient.acknowledged_at IS NOT NULL) AS acknowledged_count
+         FROM announcements announcement
+         WHERE announcement.local_id = $1
+         ORDER BY announcement.created_at DESC
+         LIMIT 100`,
+        [request.params.localId],
+      );
+      response.status(200).json({ announcements: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/:announcementId", authenticate, requireLeader, async (request, response, next) => {
+    const announcementId = request.params.announcementId;
+    if (typeof announcementId !== "string" || !uuidPattern.test(announcementId)) {
+      response.status(400).json({ error: "Invalid announcement ID" });
+      return;
+    }
+    try {
+      const result = await database.query(
+        `SELECT id, local_id, title, body, push_preview, needs_ack, status, approved_at, sent_at, created_at
+         FROM announcements
+         WHERE local_id = $1 AND id = $2`,
+        [request.params.localId, announcementId],
+      );
+      if (result.rowCount !== 1) {
+        response.status(404).json({ error: "Announcement not found in this local" });
+        return;
+      }
+      response.status(200).json({ announcement: result.rows[0] });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put("/:announcementId", authenticate, requireLeader, async (request, response, next) => {
+    const announcementId = request.params.announcementId;
+    const userId = (request as AuthenticatedRequest).userId!;
+    if (typeof announcementId !== "string" || !uuidPattern.test(announcementId)) {
+      response.status(400).json({ error: "Invalid announcement ID" });
+      return;
+    }
+    if (!isRecord(request.body)) {
+      response.status(400).json({ error: "Request body must be a JSON object" });
+      return;
+    }
+
+    const { title, body, needsAck = false, pushPreview = null } = request.body as Partial<CreateAnnouncementBody>;
+    const allowedKeys = new Set(["title", "body", "needsAck", "pushPreview"]);
+    if (
+      Object.keys(request.body).some((key) => !allowedKeys.has(key)) ||
+      typeof title !== "string" ||
+      title.trim().length === 0 ||
+      title.trim().length > 200 ||
+      typeof body !== "string" ||
+      body.trim().length === 0 ||
+      body.trim().length > 20_000 ||
+      typeof needsAck !== "boolean" ||
+      (pushPreview !== null &&
+        (typeof pushPreview !== "string" || pushPreview.trim().length > 120))
+    ) {
+      response.status(400).json({
+        error: "Provide a title (1-200 characters), body (1-20000 characters), optional boolean needsAck, and pushPreview (up to 120 characters)",
+      });
+      return;
+    }
+
+    try {
+      const result = await database.query(
+        `UPDATE announcements
+         SET title = $3, body = $4, needs_ack = $5, push_preview = $6
+         WHERE local_id = $1 AND id = $2 AND author_user_id = $7 AND status = 'draft'
+         RETURNING id, local_id, title, body, push_preview, needs_ack, status, approved_at, sent_at, created_at`,
+        [
+          request.params.localId,
+          announcementId,
+          title.trim(),
+          body.trim(),
+          needsAck,
+          typeof pushPreview === "string" ? pushPreview.trim() : null,
+          userId,
+        ],
+      );
+      if (result.rowCount !== 1) {
+        response.status(409).json({ error: "Only your own unsent drafts can be edited" });
+        return;
+      }
+      response.status(200).json({ announcement: result.rows[0] });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post(
     "/ai-draft",
     authenticate,

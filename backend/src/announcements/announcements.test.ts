@@ -39,7 +39,11 @@ test("announcement draft and send endpoints enforce local scope and transactiona
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   try {
-    for (const migrationName of ["001_initial_schema.sql", "002_user_account_status.sql"]) {
+    for (const migrationName of [
+      "001_initial_schema.sql",
+      "002_user_account_status.sql",
+      "003_outbox_worker.sql",
+    ]) {
       const migrationPath = fileURLToPath(new URL(`../db/migrations/${migrationName}`, import.meta.url));
       await testPool.query(await readFile(migrationPath, "utf8"));
     }
@@ -69,7 +73,6 @@ test("announcement draft and send endpoints enforce local scope and transactiona
       .filter((item) => item.local_id === localA)
       .map((item) => item.id as string)[1];
     const otherClass = classificationsA.find((item) => item.local_id === localB)?.id as string;
-
     const members = [
       [localA, memberOne, "Member One", wiremanClass],
       [localA, memberTwo, "Member Two", apprenticeClass],
@@ -86,6 +89,15 @@ test("announcement draft and send endpoints enforce local scope and transactiona
     const leaderToken = createAccessToken(leaderA);
     const otherLeaderToken = createAccessToken(leaderB);
     const headers = { authorization: `Bearer ${leaderToken}`, "content-type": "application/json" };
+    const localClassificationsResponse = await fetch(`${baseUrl}/locals/${localA}/announcements/classifications`, {
+      headers: { authorization: `Bearer ${leaderToken}` },
+    });
+    assert.equal(localClassificationsResponse.status, 200);
+    assert.equal((await localClassificationsResponse.json() as { classifications: unknown[] }).classifications.length, 2);
+    const forbiddenClassificationsResponse = await fetch(`${baseUrl}/locals/${localA}/announcements/classifications`, {
+      headers: { authorization: `Bearer ${otherLeaderToken}` },
+    });
+    assert.equal(forbiddenClassificationsResponse.status, 403);
     const createDraft = async (token = leaderToken) => fetch(`${baseUrl}/locals/${localA}/announcements`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -110,6 +122,25 @@ test("announcement draft and send endpoints enforce local scope and transactiona
     assert.equal(draftResponse.status, 201);
     const { announcement } = await draftResponse.json() as { announcement: { id: string; status: string } };
     assert.equal(announcement.status, "draft");
+    const draftDetails = await fetch(`${baseUrl}/locals/${localA}/announcements/${announcement.id}`, {
+      headers: { authorization: `Bearer ${leaderToken}` },
+    });
+    assert.equal(draftDetails.status, 200);
+    const editedDraft = await fetch(`${baseUrl}/locals/${localA}/announcements/${announcement.id}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        title: "Reviewed contract meeting",
+        body: "Join us after reviewing these details.",
+        needsAck: true,
+        pushPreview: "Reviewed contract meeting.",
+      }),
+    });
+    assert.equal(editedDraft.status, 200);
+    assert.equal(
+      ((await editedDraft.json() as { announcement: { title: string; status: string } }).announcement).title,
+      "Reviewed contract meeting",
+    );
 
     const otherLocalDraft = await fetch(`${baseUrl}/locals/${localB}/announcements`, {
       method: "POST",
@@ -180,6 +211,35 @@ test("announcement draft and send endpoints enforce local scope and transactiona
       send_requests: 1,
       status: "sending",
     });
+    await testPool.query(
+      `UPDATE announcement_recipients
+       SET push_status = 'delivered', read_at = now(), acknowledged_at = now()
+       WHERE announcement_id = $1`,
+      [announcement.id],
+    );
+    const leaderAnnouncementsResponse = await fetch(`${baseUrl}/locals/${localA}/announcements`, {
+      headers: { authorization: `Bearer ${leaderToken}` },
+    });
+    assert.equal(leaderAnnouncementsResponse.status, 200);
+    const listedAnnouncements = (await leaderAnnouncementsResponse.json() as {
+      announcements: Array<{
+        id: string;
+        recipient_count: number;
+        sent_count: number;
+        read_count: number;
+        acknowledged_count: number;
+      }>;
+    }).announcements;
+    const listedSentAnnouncement = listedAnnouncements.find((item) => item.id === announcement.id);
+    assert.deepEqual(
+      {
+        recipient_count: listedSentAnnouncement?.recipient_count,
+        sent_count: listedSentAnnouncement?.sent_count,
+        read_count: listedSentAnnouncement?.read_count,
+        acknowledged_count: listedSentAnnouncement?.acknowledged_count,
+      },
+      { recipient_count: 1, sent_count: 1, read_count: 1, acknowledged_count: 1 },
+    );
 
     const concurrentDraft = await createDraft();
     const concurrentDraftData = await concurrentDraft.json() as { announcement: { id: string } };

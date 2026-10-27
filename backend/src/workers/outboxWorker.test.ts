@@ -186,16 +186,25 @@ test("outbox workers claim concurrently, retry safely, and recover abandoned lea
       },
     }), 1);
     const permanentState = (await database.query(
-      `SELECT job.status, recipient.push_status, count(delivery.id)::int AS deliveries
+      `SELECT job.status, recipient.push_status, announcement.status AS announcement_status,
+              announcement.sent_at, count(delivery.id)::int AS deliveries
        FROM outbox_jobs AS job
        JOIN announcement_recipients AS recipient
          ON recipient.local_id = job.local_id AND recipient.id = job.recipient_id
+       JOIN announcements AS announcement
+         ON announcement.local_id = recipient.local_id AND announcement.id = recipient.announcement_id
        LEFT JOIN mock_push_deliveries AS delivery ON delivery.outbox_job_id = job.id
        WHERE job.id = $1
-       GROUP BY job.status, recipient.push_status`,
+       GROUP BY job.status, recipient.push_status, announcement.status, announcement.sent_at`,
       [permanentJob.id],
     )).rows[0];
-    assert.deepEqual(permanentState, { status: "failed", push_status: "failed", deliveries: 0 });
+    assert.deepEqual(permanentState, {
+      status: "failed",
+      push_status: "failed",
+      announcement_status: "failed",
+      sent_at: null,
+      deliveries: 0,
+    });
 
     const [abandonedJob] = await createJobs(1, "Abandoned lease");
     await database.query(

@@ -190,7 +190,32 @@ async function saveOutcome(
       );
       await client.query(
         `UPDATE announcements AS announcement
-         SET status = 'sent', sent_at = COALESCE(sent_at, now())
+         SET status = CASE
+               WHEN EXISTS (
+                 SELECT 1
+                 FROM announcement_recipients AS failed_recipient
+                 JOIN outbox_jobs AS failed_job
+                   ON failed_job.local_id = failed_recipient.local_id
+                  AND failed_job.recipient_id = failed_recipient.id
+                 WHERE failed_recipient.local_id = announcement.local_id
+                   AND failed_recipient.announcement_id = announcement.id
+                   AND failed_job.status = 'failed'
+               ) THEN 'failed'
+               ELSE 'sent'
+             END,
+             sent_at = CASE
+               WHEN EXISTS (
+                 SELECT 1
+                 FROM announcement_recipients AS failed_recipient
+                 JOIN outbox_jobs AS failed_job
+                   ON failed_job.local_id = failed_recipient.local_id
+                  AND failed_job.recipient_id = failed_recipient.id
+                 WHERE failed_recipient.local_id = announcement.local_id
+                   AND failed_recipient.announcement_id = announcement.id
+                   AND failed_job.status = 'failed'
+               ) THEN NULL
+               ELSE COALESCE(sent_at, now())
+             END
          WHERE announcement.local_id = $1
            AND announcement.id = (
              SELECT recipient.announcement_id
