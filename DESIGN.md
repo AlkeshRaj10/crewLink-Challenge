@@ -85,3 +85,10 @@ flowchart LR
       Note["Every request and job is scoped to its local;<br/>authorization is checked per user, role, and local."]
     end
 ```
+
+## What is not built yet and what comes next
+
+- **Real-time and push delivery:** the worker uses a simulated provider; it does not register devices or send notifications through APNs, FCM, or another external service. Next, consider Socket.IO for low-latency updates to authenticated members while they are connected, alongside provider integration for offline device delivery. Authorize each socket for its local and membership, and treat events as prompts to fetch the persisted announcement rather than as the source of truth. Add secure device-token registration and revocation, delivery receipts, and provider idempotency; exactly-once external delivery still depends on provider support.
+- **Production operations:** the repo is set up for local assessment and seeded test accounts, not production deployment. Before launch, add production identity provisioning and recovery, managed secrets, API rate limits, audit events for sensitive actions, monitoring and alerting, and tested backup/restore procedures.
+- **AI governance:** AI drafting is optional and requires a leader to review and explicitly send the saved draft. Next, define provider data-retention requirements and add usage limits and quality evaluations; AI output must remain a suggestion, never an automatic send.
+- **Launch validation:** add a staging deployment and operational checks, including load, accessibility, and recovery testing, before serving real locals or members.
